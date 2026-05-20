@@ -1,18 +1,50 @@
 package main
 
 import (
-    "github.com/gin-gonic/gin"
-    "net/http"
+	"context"
+	"log/slog"
+	"net/http"
+	"os"
+
+	"github.com/gin-gonic/gin"
+	"go-url-shortener/internal/cache"
+	"go-url-shortener/internal/config"
+	"go-url-shortener/internal/handler"
+	"go-url-shortener/internal/repository"
 )
 
 func main() {
-    r := gin.Default()
-    
-    r.GET("/health", func(c *gin.Context) {
-        c.JSON(http.StatusOK, gin.H{
-            "status": "healthy",
-        })
-    })
-    
-    r.Run(":8080")
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
+	cfg := config.Load()
+	ctx := context.Background()
+
+	db, err := repository.NewPool(ctx, cfg.DBURL)
+	if err != nil {
+		slog.Error("postgres connection failed", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	slog.Info("postgres connected")
+
+	redisClient, err := cache.NewClient(ctx, cfg.RedisURL)
+	if err != nil {
+		slog.Error("redis connection failed", "error", err)
+		os.Exit(1)
+	}
+	defer redisClient.Close()
+	slog.Info("redis connected")
+
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	healthHandler := handler.NewHealthHandler(db, redisClient)
+	r.GET("/health", healthHandler.Check)
+
+	slog.Info("server starting", "port", cfg.Port)
+	if err := r.Run(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
+		slog.Error("server error", "error", err)
+		os.Exit(1)
+	}
 }
