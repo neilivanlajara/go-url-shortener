@@ -40,7 +40,15 @@ func main() {
 	r.Use(gin.Recovery())
 
 	healthHandler := handler.NewHealthHandler(db, redisClient)
+	urlHandler := handler.NewURLHandler(db, redisClient, cfg.BaseURL)
+
 	r.GET("/health", healthHandler.Check)
+
+	r.POST("/shorten", urlHandler.Shorten)
+	r.GET("/urls", urlHandler.ListAll)
+	r.GET("/:shortcode", urlHandler.Redirect)
+	r.GET("/:shortcode/stats", urlHandler.Stats)
+	r.DELETE("/:shortcode", urlHandler.Delete)
 
 	slog.Info("server starting", "port", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
